@@ -6,6 +6,7 @@
 
 import os
 import hashlib
+from sysconfig import get_python_version
 import matplotlib.pyplot as plt
 from collections import Counter
 from datetime import datetime
@@ -160,5 +161,5 @@ class DirectoryVisualizer:
 # In[3]:
 
 
-get_ipython().system('jupyter nbconvert --to script visualization.ipynb')
+get_python_version().system('jupyter nbconvert --to script visualization.ipynb')
 
