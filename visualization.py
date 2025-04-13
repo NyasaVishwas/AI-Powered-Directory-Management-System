@@ -1,165 +1,145 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 import os
-import hashlib
-from sysconfig import get_python_version
+import tkinter as tk
+from tkinter import ttk
 import matplotlib.pyplot as plt
-from collections import Counter
-from datetime import datetime
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from collections import defaultdict
 import numpy as np
-
-
-# In[2]:
-
+from sklearn.cluster import KMeans
 
 class DirectoryVisualizer:
     @staticmethod
     def get_files_and_folders(path):
-        """ Returns files and folders from the selected directory. """
+        """Scan directory and return files and folders with sizes"""
         files = []
-        folders = {}
-
-        for root, dirs, filenames in os.walk(path):
-            for file in filenames:
-                ext = os.path.splitext(file)[-1].lower() or "No Extension"
-                file_path = os.path.join(root, file)
-                try:
-                    size = os.path.getsize(file_path)
-                    created_time = os.path.getctime(file_path)
-                    files.append((file_path, ext, size, created_time))
-                except:
-                    pass
-
-            for folder in dirs:
-                folder_path = os.path.join(root, folder)
-                try:
-                    total_size = sum(os.path.getsize(os.path.join(folder_path, f)) for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)))
-                    folders[folder] = total_size
-                except:
-                    pass
-
+        folders = []
+        try:
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_file():
+                            files.append((entry.path, entry.stat().st_size))
+                        elif entry.is_dir():
+                            size = sum(os.path.getsize(os.path.join(r, f)) 
+                                     for r, _, fs in os.walk(entry.path) 
+                                     for f in fs if os.path.exists(os.path.join(r, f)))
+                            folders.append((entry.path, size))
+                    except (FileNotFoundError, PermissionError):
+                        continue
+        except Exception as e:
+            print(f"Scan error: {e}")
         return files, folders
 
     @staticmethod
-    def visualize_largest_files(path):
-        """ Creates a bar chart for the largest files. """
+    def create_largest_files_chart(path, callback=None):
+        """Create bar chart of largest files"""
         files, _ = DirectoryVisualizer.get_files_and_folders(path)
-
         if not files:
-            print("No files found in the selected directory.")
-            return
-
-        sorted_files = sorted(files, key=lambda x: x[2], reverse=True)[:10]
+            return None
+        sorted_files = sorted(files, key=lambda x: x[1], reverse=True)[:10]
         file_names = [os.path.basename(f[0]) for f in sorted_files]
-        file_sizes = [f[2] / (1024 * 1024) for f in sorted_files]  # Convert to MB
+        file_paths =万人门票在线观看完整版file_sizes = [f[1] / (1024 * 1024) for f in sorted_files]  # MB
 
-        plt.figure(figsize=(8, 4))
-        plt.bar(file_names, file_sizes, color="orange")
-        plt.xlabel("Files")
-        plt.ylabel("Size (MB)")
-        plt.xticks(rotation=45, ha="right")
-        plt.title("Top 10 Largest Files")
-        plt.show()
-
-    @staticmethod
-    def detect_duplicate_files(path):
-        """ Detects and lists duplicate files based on their hash. """
-        files, _ = DirectoryVisualizer.get_files_and_folders(path)
-        hash_map = {}
-
-        def hash_file(file_path):
-            """ Returns SHA-256 hash of the given file. """
-            try:
-                hasher = hashlib.sha256()
-                with open(file_path, "rb") as f:
-                    while chunk := f.read(8192):
-                        hasher.update(chunk)
-                return hasher.hexdigest()
-            except:
-                return None
-
-        duplicates = {}
-        for file_path, _, _, _ in files:
-            file_hash = hash_file(file_path)
-            if file_hash:
-                if file_hash in hash_map:
-                    duplicates.setdefault(file_hash, []).append(file_path)
-                else:
-                    hash_map[file_hash] = file_path
-
-        # Display results
-        if duplicates:
-            print("\n🔍 Duplicate Files Found:")
-            for file_hash, paths in duplicates.items():
-                print(f"\nHash: {file_hash}")
-                for path in paths:
-                    print(f" - {path}")
-        else:
-            print("\n✅ No duplicate files found.")
+        fig, ax = plt.subplots(figsize=(8, 4))
+        bars = ax.barh(file_names, file_sizes, color='skyblue')
+        ax.set_xlabel('Size (MB)')
+        ax.set_title('Top 10 Largest Files')
+        if callback:
+            def on_click(event):
+                if event.inaxes == ax:
+                    for i, bar in enumerate(bars):
+                        if bar.contains(event)[0]:
+                            callback(sorted_files[i][0])
+            fig.canvas.mpl_connect('button_press_event', on_click)
+        plt.tight_layout()
+        return fig
 
     @staticmethod
-    def visualize_file_types_static(path):
-        """ Creates a pie chart for file type distribution. """
-        files, _ = DirectoryVisualizer.get_files_and_folders(path)
-        ext_counts = Counter(ext for _, ext, _, _ in files)
-
-        if not ext_counts:
-            print("No files found in the selected directory.")
-            return
-
-        plt.figure(figsize=(6, 4))
-        plt.pie(ext_counts.values(), labels=ext_counts.keys(), autopct="%1.1f%%", colors=plt.cm.Paired.colors)
-        plt.title("File Type Distribution")
-        plt.show()
-
-    @staticmethod
-    def visualize_folder_sizes_static(path):
-        """ Creates a bar chart for the largest folders. """
+    def create_folder_sizes_chart(path):
+        """Create bar chart of largest folders"""
         _, folders = DirectoryVisualizer.get_files_and_folders(path)
-
         if not folders:
-            print("No folders found in the selected directory.")
-            return
+            return None
+        sorted_folders = sorted(folders, key=lambda x: x[1], reverse=True)[:8]
+        folder_names = [os.path.basename(f[0]) for f in sorted_folders]
+        folder_sizes = [f[1] / (1024 * 1024) for f in sorted_folders]
 
-        sorted_folders = sorted(folders.items(), key=lambda x: x[1], reverse=True)[:10]
-        folder_names, folder_sizes = zip(*sorted_folders)
-
-        plt.figure(figsize=(8, 4))
-        plt.bar(folder_names, np.array(folder_sizes) / (1024 * 1024), color="blue")
-        plt.xlabel("Folders")
-        plt.ylabel("Size (MB)")
-        plt.xticks(rotation=45, ha="right")
-        plt.title("Top 10 Largest Folders")
-        plt.show()
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.barh(folder_names, folder_sizes, color='lightgreen')
+        ax.set_xlabel('Size (MB)')
+        ax.set_title('Largest Folders')
+        plt.tight_layout()
+        return fig
 
     @staticmethod
-    def visualize_file_ages_static(path):
-        """ Creates a histogram showing file age distribution. """
+    def create_file_types_pie_chart(path):
+        """Create pie chart of file type distribution"""
         files, _ = DirectoryVisualizer.get_files_and_folders(path)
-        timestamps = [created_time for _, _, _, created_time in files]
+        if not files:
+            return None
+        type_sizes = defaultdict(int)
+        for filepath, size in files:
+            ext = os.path.splitext(filepath)[1].lower() or 'No Extension'
+            type_sizes[ext] += size
 
-        if not timestamps:
-            print("No files found in the selected directory.")
-            return
+        threshold = sum(type_sizes.values()) * 0.03
+        filtered_types = {k: v for k, v in type_sizes.items() if v >= threshold}
+        other_size = sum(v for v in type_sizes.values() if v < threshold)
+        if other_size > 0:
+            filtered_types['Other'] = other_size
 
-        dates = [datetime.fromtimestamp(ts).date() for ts in timestamps]
-        date_counts = Counter(dates)
+        labels = list(filtered_types.keys())
+        sizes = [v / (1024 * 1024) for v in filtered_types.values()]
 
-        plt.figure(figsize=(8, 4))
-        plt.bar(date_counts.keys(), date_counts.values(), color="green")
-        plt.xlabel("Date")
-        plt.ylabel("Number of Files")
-        plt.xticks(rotation=45, ha="right")
-        plt.title("File Age Analysis")
-        plt.show()
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
+        ax.set_title('File Type Distribution by Size')
+        return fig
 
+    @staticmethod
+    def create_file_clusters(path):
+        """AI-powered file clustering by size and mod time"""
+        files, _ = DirectoryVisualizer.get_files_and_folders(path)
+        if len(files) < 3:
+            return None, None
+        features = np.array([[f[1], os.path.getmtime(f[0])] for f in files])
+        kmeans = KMeans(n_clusters=min(3, len(files)), random_state=42).fit(features)
+        
+        cluster_info = {}
+        for i, label in enumerate(kmeans.labels_):
+            cluster_info.setdefault(label, []).append(files[i][0])
+        
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.scatter(features[:, 1], features[:, 0] / 1024, c=kmeans.labels_, cmap='viridis')
+        ax.set_xlabel('Last Modified (Unix Time)')
+        ax.set_ylabel('Size (KB)')
+        ax.set_title('File Clusters')
+        plt.tight_layout()
+        return fig, cluster_info
 
-# In[3]:
-
-
-get_python_version().system('jupyter nbconvert --to script visualization.ipynb')
-
+    @staticmethod
+    def get_visualization_frame(parent, path, callback=None):
+        """Create tabbed visualization interface"""
+        frame = ttk.Frame(parent)
+        tab_control = ttk.Notebook(frame)
+        
+        tabs = [
+            ("Large Files", DirectoryVisualizer.create_largest_files_chart(path, callback)),
+            ("Large Folders", DirectoryVisualizer.create_folder_sizes_chart(path)),
+            ("File Types", DirectoryVisualizer.create_file_types_pie_chart(path)),
+            ("AI Clustering", DirectoryVisualizer.create_file_clusters(path)[0])
+        ]
+        
+        for name, fig in tabs:
+            tab = ttk.Frame(tab_control)
+            if fig:
+                canvas = FigureCanvasTkAgg(fig, master=tab)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            else:
+                tk.Label(tab, text=f"No data for {name}").pack()
+            tab_control.add(tab, text=name)
+        
+        tab_control.pack(fill=tk.BOTH, expand=True)
+        cluster_info = DirectoryVisualizer.create_file_clusters(path)[1]
+        return frame, cluster_info

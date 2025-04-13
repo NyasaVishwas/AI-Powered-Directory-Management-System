@@ -1,0 +1,14 @@
+# Core GUI (tkinter is bundled with Python, no need to install separately)
+# tk==0.1.0  # Removed since it's not needed via pip
+
+# Image processing for recycle bin icon
+Pillow>=10.0.0,<11.0.0  # Flexible range, avoids problematic 10.3.0 build
+
+# Plotting and visualization
+matplotlib>=3.8.0,<4.0.0
+
+# Numerical computations
+numpy>=1.26.0,<2.0.0
+
+# Machine learning for clustering
+scikit-learn>=1.4.0,<2.0.0
