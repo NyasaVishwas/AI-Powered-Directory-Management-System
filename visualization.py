@@ -1,145 +1,246 @@
 import os
-import tkinter as tk
-from tkinter import ttk
+import mimetypes
+import datetime
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from collections import defaultdict
+import matplotlib.patches as patches
+from PIL import Image
 import numpy as np
-from sklearn.cluster import KMeans
+from wordcloud import WordCloud
+from collections import Counter
 
-class DirectoryVisualizer:
-    @staticmethod
-    def get_files_and_folders(path):
-        """Scan directory and return files and folders with sizes"""
-        files = []
-        folders = []
+class VisualizationManager:
+    def __init__(self):
+        mimetypes.init()
+        self.colors = plt.cm.tab20(np.linspace(0, 1, 20))
+        self.on_click_callback = None
+        self.tag_positions = {}
+
+    def set_click_callback(self, callback):
+        self.on_click_callback = callback
+
+    def get_file_type_distribution(self, directory):
+        file_types = {}
+        for item in os.listdir(directory):
+            full_path = os.path.join(directory, item)
+            if os.path.isfile(full_path):
+                ext = os.path.splitext(item)[1].lower() or "No Extension"
+                size = os.path.getsize(full_path) // 1024
+                if ext not in file_types:
+                    file_types[ext] = {"count": 0, "size": 0, "files": []}
+                file_types[ext]["count"] += 1
+                file_types[ext]["size"] += size
+                file_types[ext]["files"].append(full_path)
+        return file_types
+
+    def get_file_info(self, file_path):
         try:
-            with os.scandir(path) as entries:
-                for entry in entries:
-                    try:
-                        if entry.is_file():
-                            files.append((entry.path, entry.stat().st_size))
-                        elif entry.is_dir():
-                            size = sum(os.path.getsize(os.path.join(r, f)) 
-                                     for r, _, fs in os.walk(entry.path) 
-                                     for f in fs if os.path.exists(os.path.join(r, f)))
-                            folders.append((entry.path, size))
-                    except (FileNotFoundError, PermissionError):
-                        continue
-        except Exception as e:
-            print(f"Scan error: {e}")
-        return files, folders
-
-    @staticmethod
-    def create_largest_files_chart(path, callback=None):
-        """Create bar chart of largest files"""
-        files, _ = DirectoryVisualizer.get_files_and_folders(path)
-        if not files:
+            size = os.path.getsize(file_path) // 1024
+            mime_type, _ = mimetypes.guess_type(file_path)
+            file_type = mime_type if mime_type else "Unknown"
+            modified = datetime.datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M')
+            thumbnail = None
+            if mime_type and mime_type.startswith("image"):
+                try:
+                    img = Image.open(file_path)
+                    img.thumbnail((100, 100))
+                    thumbnail = img
+                except:
+                    pass
+            return {
+                "size_kb": size,
+                "type": file_type,
+                "modified": modified,
+                "thumbnail": thumbnail,
+                "icon": self.get_file_icon(file_path)
+            }
+        except:
             return None
-        sorted_files = sorted(files, key=lambda x: x[1], reverse=True)[:10]
-        file_names = [os.path.basename(f[0]) for f in sorted_files]
-        file_paths =万人门票在线观看完整版file_sizes = [f[1] / (1024 * 1024) for f in sorted_files]  # MB
 
-        fig, ax = plt.subplots(figsize=(8, 4))
-        bars = ax.barh(file_names, file_sizes, color='skyblue')
-        ax.set_xlabel('Size (MB)')
-        ax.set_title('Top 10 Largest Files')
-        if callback:
-            def on_click(event):
-                if event.inaxes == ax:
-                    for i, bar in enumerate(bars):
-                        if bar.contains(event)[0]:
-                            callback(sorted_files[i][0])
-            fig.canvas.mpl_connect('button_press_event', on_click)
-        plt.tight_layout()
-        return fig
+    def get_file_icon(self, file_path):
+        if os.path.isdir(file_path):
+            return "📁"
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if mime_type:
+            if mime_type.startswith("image"):
+                return "🖼️"
+            elif mime_type.startswith("video"):
+                return "🎥"
+            elif mime_type.startswith("audio"):
+                return "🎵"
+            elif mime_type.startswith("text") or mime_type == "application/pdf":
+                return "📄"
+        return "📄"
 
-    @staticmethod
-    def create_folder_sizes_chart(path):
-        """Create bar chart of largest folders"""
-        _, folders = DirectoryVisualizer.get_files_and_folders(path)
-        if not folders:
-            return None
-        sorted_folders = sorted(folders, key=lambda x: x[1], reverse=True)[:8]
-        folder_names = [os.path.basename(f[0]) for f in sorted_folders]
-        folder_sizes = [f[1] / (1024 * 1024) for f in sorted_folders]
+    def plot_tree_map(self, ax, file_types):
+        if not file_types:
+            return
+        sizes = [data["size"] for data in file_types.values()]
+        total_size = sum(sizes)
+        if total_size == 0:
+            return
+        sizes = [s / total_size for s in sizes]
+        labels = [f"{ext}\n{data['count']} files\n{data['size']} KB" for ext, data in file_types.items()]
+        exts = list(file_types.keys())
+        colors = self.colors[:len(file_types)]
 
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.barh(folder_names, folder_sizes, color='lightgreen')
-        ax.set_xlabel('Size (MB)')
-        ax.set_title('Largest Folders')
-        plt.tight_layout()
-        return fig
-
-    @staticmethod
-    def create_file_types_pie_chart(path):
-        """Create pie chart of file type distribution"""
-        files, _ = DirectoryVisualizer.get_files_and_folders(path)
-        if not files:
-            return None
-        type_sizes = defaultdict(int)
-        for filepath, size in files:
-            ext = os.path.splitext(filepath)[1].lower() or 'No Extension'
-            type_sizes[ext] += size
-
-        threshold = sum(type_sizes.values()) * 0.03
-        filtered_types = {k: v for k, v in type_sizes.items() if v >= threshold}
-        other_size = sum(v for v in type_sizes.values() if v < threshold)
-        if other_size > 0:
-            filtered_types['Other'] = other_size
-
-        labels = list(filtered_types.keys())
-        sizes = [v / (1024 * 1024) for v in filtered_types.values()]
-
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140)
-        ax.set_title('File Type Distribution by Size')
-        return fig
-
-    @staticmethod
-    def create_file_clusters(path):
-        """AI-powered file clustering by size and mod time"""
-        files, _ = DirectoryVisualizer.get_files_and_folders(path)
-        if len(files) < 3:
-            return None, None
-        features = np.array([[f[1], os.path.getmtime(f[0])] for f in files])
-        kmeans = KMeans(n_clusters=min(3, len(files)), random_state=42).fit(features)
-        
-        cluster_info = {}
-        for i, label in enumerate(kmeans.labels_):
-            cluster_info.setdefault(label, []).append(files[i][0])
-        
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.scatter(features[:, 1], features[:, 0] / 1024, c=kmeans.labels_, cmap='viridis')
-        ax.set_xlabel('Last Modified (Unix Time)')
-        ax.set_ylabel('Size (KB)')
-        ax.set_title('File Clusters')
-        plt.tight_layout()
-        return fig, cluster_info
-
-    @staticmethod
-    def get_visualization_frame(parent, path, callback=None):
-        """Create tabbed visualization interface"""
-        frame = ttk.Frame(parent)
-        tab_control = ttk.Notebook(frame)
-        
-        tabs = [
-            ("Large Files", DirectoryVisualizer.create_largest_files_chart(path, callback)),
-            ("Large Folders", DirectoryVisualizer.create_folder_sizes_chart(path)),
-            ("File Types", DirectoryVisualizer.create_file_types_pie_chart(path)),
-            ("AI Clustering", DirectoryVisualizer.create_file_clusters(path)[0])
-        ]
-        
-        for name, fig in tabs:
-            tab = ttk.Frame(tab_control)
-            if fig:
-                canvas = FigureCanvasTkAgg(fig, master=tab)
-                canvas.draw()
-                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        sizes = sorted(sizes, reverse=True)
+        rects = []
+        x, y, width, height = 0, 0, 1, 1
+        for size in sizes:
+            if width > height:
+                w = size / height
+                rects.append((x, y, w, height))
+                x += w
+                width -= w
             else:
-                tk.Label(tab, text=f"No data for {name}").pack()
-            tab_control.add(tab, text=name)
-        
-        tab_control.pack(fill=tk.BOTH, expand=True)
-        cluster_info = DirectoryVisualizer.create_file_clusters(path)[1]
-        return frame, cluster_info
+                h = size / width
+                rects.append((x, y, width, h))
+                y += h
+                height -= h
+
+        self.rect_patches = []
+        for (x, y, w, h), label, ext, color in zip(rects, labels, exts, colors):
+            if w > 0 and h > 0:
+                patch = patches.Rectangle((x, y), w, h, facecolor=color, edgecolor="white")
+                self.rect_patches.append((patch, ext))
+                ax.add_patch(patch)
+                ax.text(x + w/2, y + h/2, label, ha="center", va="center", fontsize=10, wrap=True)
+
+        def on_click(event):
+            if event.inaxes != ax:
+                return
+            for patch, ext in self.rect_patches:
+                if patch.contains_point((event.x, event.y)):
+                    if self.on_click_callback:
+                        self.on_click_callback(ext, file_types[ext]["files"])
+                    break
+
+        ax.figure.canvas.mpl_connect('button_press_event', on_click)
+        ax.set_aspect('equal')
+        ax.axis('off')
+
+    def plot_timeline(self, ax, directory):
+        dates = []
+        for item in os.listdir(directory):
+            full_path = os.path.join(directory, item)
+            if os.path.isfile(full_path):
+                mtime = os.path.getmtime(full_path)
+                date = datetime.datetime.fromtimestamp(mtime).date()
+                dates.append(date)
+        if not dates:
+            ax.text(0.5, 0.5, "No files to display", ha="center", va="center", fontsize=12)
+            return
+
+        date_counts = {}
+        for date in dates:
+            date_counts[date] = date_counts.get(date, 0) + 1
+
+        sorted_dates = sorted(date_counts.keys())
+        counts = [date_counts[d] for d in sorted_dates]
+        ax.plot(sorted_dates, counts, marker='o', color=self.colors[0])
+        ax.set_xlabel("Date", fontsize=14)
+        ax.set_ylabel("Number of Files", fontsize=14)
+        ax.set_title("Files by Modification Date", fontsize=16)
+        ax.tick_params(axis='x', rotation=45, labelsize=10)
+        ax.grid(True, linestyle='--', alpha=0.7)
+
+    def plot_depth_pie(self, ax, directory):
+        depths = {}
+        for root, _, files in os.walk(directory):
+            depth = len(os.path.relpath(root, directory).split(os.sep)) - 1
+            if depth == -1:
+                depth = 0
+            depths[depth] = depths.get(depth, 0) + len(files)
+
+        if not depths:
+            ax.text(0.5, 0.5, "No files to display", ha="center", va="center", fontsize=12)
+            return
+
+        labels = [f"Depth {d}" for d in depths.keys()]
+        sizes = list(depths.values())
+        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=self.colors[:len(depths)], textprops={'fontsize': 10})
+        ax.axis('equal')
+        ax.set_title("Files by Directory Depth", fontsize=16)
+
+    def plot_tag_cloud(self, ax, directory, tags_cache):
+        tags = []
+        for item in os.listdir(directory):
+            full_path = os.path.join(directory, item)
+            if os.path.isfile(full_path):
+                tags.extend(tags_cache.get(full_path, []))
+        if not tags:
+            ax.text(0.5, 0.5, "No tags to display", ha="center", va="center", fontsize=12)
+            return
+
+        tag_counts = Counter(tags)
+        wordcloud = WordCloud(
+            width=800, height=400,
+            background_color='white',
+            colormap='tab20',
+            min_font_size=10,
+            max_font_size=100
+        ).generate_from_frequencies(tag_counts)
+
+        ax.imshow(wordcloud, interpolation='bilinear')
+        ax.axis('off')
+        ax.set_title("Tag Cloud", fontsize=16)
+
+        self.tag_positions = {}
+        for word, freq in tag_counts.items():
+            self.tag_positions[word] = wordcloud.layout_[:len(tag_counts)]
+
+        def on_click(event):
+            if event.inaxes != ax:
+                return
+            x, y = event.xdata, event.ydata
+            if x is None or y is None:
+                return
+            for tag in self.tag_positions:
+                files = [
+                    os.path.join(directory, item)
+                    for item in os.listdir(directory)
+                    if os.path.isfile(os.path.join(directory, item))
+                    and tag in tags_cache.get(os.path.join(directory, item), [])
+                ]
+                if files and self.on_click_callback:
+                    self.on_click_callback(tag, files)
+                    break
+
+        ax.figure.canvas.mpl_connect('button_press_event', on_click)
+
+    def plot_file_age_bar(self, ax, directory):
+        now = datetime.datetime.now()
+        age_categories = {
+            "Today": 0,
+            "This Week": 0,
+            "This Month": 0,
+            "Older": 0
+        }
+        for item in os.listdir(directory):
+            full_path = os.path.join(directory, item)
+            if os.path.isfile(full_path):
+                mtime = datetime.datetime.fromtimestamp(os.path.getmtime(full_path))
+                age_days = (now - mtime).days
+                if age_days < 1:
+                    age_categories["Today"] += 1
+                elif age_days < 7:
+                    age_categories["This Week"] += 1
+                elif age_days < 30:
+                    age_categories["This Month"] += 1
+                else:
+                    age_categories["Older"] += 1
+
+        if not any(age_categories.values()):
+            ax.text(0.5, 0.5, "No files to display", ha="center", va="center", fontsize=12)
+            return
+
+        categories = list(age_categories.keys())
+        counts = list(age_categories.values())
+        max_count = max(counts) if counts else 1
+        ax.bar(categories, counts, color=self.colors[:len(categories)], edgecolor='black', width=0.2)
+        ax.set_xlabel("Age", fontsize=10)
+        ax.set_ylabel("Number of Files", fontsize=10)
+        ax.set_title("File Age Distribution", fontsize=14)
+        ax.tick_params(axis='both', labelsize=10)
+        ax.set_ylim(0, max_count * 1.1)  # Tight y-axis with 10% padding
+        ax.grid(True, linestyle='--', alpha=0.7)
