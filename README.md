@@ -18,7 +18,6 @@ A modern, interactive file manager with AI-driven features and vibrant visualiza
   - **Depth Pie**: Files by directory depth.
   - **Tag Cloud**: Tag frequency, clickable to filter by tag.
   - **File Age Bar**: Files by age (Today, This Week, This Month, Older).
-  - File preview with thumbnails for images.
 - **Search**: Filter by name or tags.
 - **UI**:
   - Light (`flatly`) and dark (`darkly`) themes, toggleable.
