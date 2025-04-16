@@ -33,5 +33,5 @@ A modern, interactive file manager with AI-driven features and vibrant visualiza
 
 1. **Clone the Repository** (or copy files to your directory):
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/NyasaVishwas/AI-Powered-Directory-Management-System.git
    cd AI-Powered-Directory-Management-System
