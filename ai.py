@@ -87,10 +87,21 @@ class AIDirectoryManager:
                 with open(file_path, "r", encoding="utf-8") as f:
                     return f.read()
             elif ext == ".pdf":
-                with open(file_path, "rb") as f:
-                    pdf = PyPDF2.PdfReader(f)
-                    text = " ".join(page.extract_text() for page in pdf.pages if page.extract_text())
+                try:
+                    # Try text extraction first
+                    with open(file_path, "rb") as f:
+                        pdf = PyPDF2.PdfReader(f)
+                        text = " ".join(page.extract_text() or "" for page in pdf.pages)
+                        if text.strip():
+                            return text
+                    # Fallback to OCR for scanned PDFs
+                    from pdf2image import convert_from_path
+                    images = convert_from_path(file_path)
+                    text = " ".join(pytesseract.image_to_string(img) for img in images)
                     return text if text.strip() else ""
+                except Exception as e:
+                    logger.error(f"Error extracting text from PDF {file_path}: {e}")
+                    return ""
             elif ext in [".jpg", ".png", ".jpeg"]:
                 text = pytesseract.image_to_string(Image.open(file_path))
                 return text if text.strip() else ""

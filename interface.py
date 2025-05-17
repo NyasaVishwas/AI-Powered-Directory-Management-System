@@ -32,8 +32,8 @@ purge_old_files()
 
 class FileManagerApp:
     def __init__(self, root):
-        self.style = ttkb.Style()  # Initialize Style
-        self.style.theme_use("flatly")  # Set initial theme
+        self.style = ttkb.Style()
+        self.style.theme_use("flatly")
         self.root = ttkb.Window(themename="flatly")
         self.root.title("\U0001F4C1 AI-Powered Directory Management System")
         self.root.state('zoomed')
@@ -45,7 +45,8 @@ class FileManagerApp:
         self.tags_cache = {}
         self.undo_stack = []
         self.vis_mode = "pie"
-        self.theme_var = tk.StringVar(value="flatly")  # Track theme
+        self.theme_var = tk.StringVar(value="flatly")
+        self.content_search_var = tk.BooleanVar(value=False)
 
         self.main_frame = ttk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
@@ -68,7 +69,8 @@ class FileManagerApp:
         self.search_mode_var = tk.StringVar(value="name")
         ttk.Radiobutton(self.top_frame, text="Name", variable=self.search_mode_var, value="name", command=self.search_items).pack(side=tk.LEFT)
         ttk.Radiobutton(self.top_frame, text="Tags", variable=self.search_mode_var, value="tags", command=self.search_items).pack(side=tk.LEFT)
-        self.menu_button = ttk.Menubutton(self.top_frame, text="⋮", style="primary.TButton")
+        ttk.Checkbutton(self.top_frame, text="Content", variable=self.content_search_var, command=self.search_items).pack(side=tk.LEFT, padx=5)
+        self.menu_button = ttk.Menubutton(self.top_frame, text="Menu", style="primary.TButton")  # Changed from ⋮ to "Menu"
         self.menu_button.menu = tk.Menu(self.menu_button, tearoff=0)
         self.menu_button["menu"] = self.menu_button.menu
         self.menu_button.menu.add_command(label="Open Recycle Bin", command=self.open_recycle_bin)
@@ -155,17 +157,8 @@ class FileManagerApp:
             self.style.theme_use("flatly")
             self.theme_var.set("flatly")
             self.theme_button.config(text="🌙 Dark Mode")
-        # Refresh widget styles
         self.style.configure("Treeview", rowheight=25)
         self.style.map("Treeview", background=[('selected', '#007bff')])
-        # Update status_label if it has bootstyle
-        if self.status_label:
-            try:
-                current_bootstyle = self.status_label.cget("bootstyle")
-                self.status_label.configure(bootstyle=current_bootstyle or "inverse")
-            except tk.TclError:
-                pass  # Skip if bootstyle isn't supported
-        # Update other widgets
         for widget in self.top_frame.winfo_children() + self.toggle_frame.winfo_children() + self.btn_frame.winfo_children():
             if isinstance(widget, (ttk.Button, ttk.Menubutton)):
                 style_name = widget.cget("style") or "TButton"
@@ -175,10 +168,7 @@ class FileManagerApp:
                     current_bootstyle = widget.cget("bootstyle")
                     widget.configure(bootstyle=current_bootstyle or "")
                 except tk.TclError:
-                    pass  # Skip if bootstyle isn't supported
-            # Skip Entries to avoid bootstyle issues; theme change handles their appearance
-            # elif isinstance(widget, ttk.Entry):
-            #     pass
+                    pass
 
     def create_context_menu(self):
         self.menu = tk.Menu(self.root, tearoff=0)
@@ -385,25 +375,39 @@ class FileManagerApp:
             self.empty_bin_button = None
 
         filter_text = filter_text.lower()
+        content_search = self.content_search_var.get()
+        matched_files = 0
         for item in os.listdir(path):
             full_path = os.path.join(path, item)
+            matches = False
             if search_mode == "name":
                 name_words = os.path.splitext(item)[0].lower().split()
-                if filter_text and not any(filter_text in word for word in name_words):
-                    continue
+                if not filter_text or any(filter_text in word for word in name_words):
+                    matches = True
             elif search_mode == "tags":
-                if not os.path.isfile(full_path):
+                if os.path.isfile(full_path):
+                    tags = self.tags_cache.get(full_path, [])
+                    if not filter_text or any(filter_text in tag.lower() for tag in tags):
+                        matches = True
+            if content_search and os.path.isfile(full_path) and filter_text:
+                try:
+                    text = self.ai_manager.extract_text(full_path)
+                    print(f"DEBUG: Content of {item}: {text[:100]}")  # Debug
+                    if text and filter_text in text.lower():
+                        matches = True
+                except Exception as e:
+                    print(f"ERROR: Failed to read {item}: {e}")
                     continue
-                tags = self.tags_cache.get(full_path, [])
-                if filter_text and not any(filter_text in tag.lower() for tag in tags):
-                    continue
-
-            size_kb = os.path.getsize(full_path) // 1024 if os.path.isfile(full_path) else "-"
-            modified = datetime.datetime.fromtimestamp(os.path.getmtime(full_path)).strftime('%Y-%m-%d %H:%M')
-            icon = self.vis_manager.get_file_icon(full_path)
-            tags = ", ".join(self.tags_cache.get(full_path, [])) if os.path.isfile(full_path) else ""
-            item_id = self.tree.insert("", "end", values=(f"{icon} {item}", size_kb, modified, tags))
-            self.file_paths.append((item_id, full_path))
+            if matches:
+                size_kb = os.path.getsize(full_path) // 1024 if os.path.isfile(full_path) else "-"
+                modified = datetime.datetime.fromtimestamp(os.path.getmtime(full_path)).strftime('%Y-%m-%d %H:%M')
+                icon = self.vis_manager.get_file_icon(full_path)
+                tags = ", ".join(self.tags_cache.get(full_path, [])) if os.path.isfile(full_path) else ""
+                item_id = self.tree.insert("", "end", values=(f"{icon} {item}", size_kb, modified, tags))
+                self.file_paths.append((item_id, full_path))
+                matched_files += 1
+                if content_search and matched_files >= 100:
+                    break
 
         if self.current_path == RECYCLE_BIN:
             self.empty_bin_button = ttk.Button(self.main_frame, text="Empty Recycle Bin", command=self.empty_recycle_bin, style="danger.TButton")
@@ -564,6 +568,7 @@ class FileManagerApp:
 
     def clear_search(self):
         self.search_entry.delete(0, tk.END)
+        self.content_search_var.set(False)
         self.list_directory()
 
     def open_recycle_bin(self):
