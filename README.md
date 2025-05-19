@@ -5,7 +5,7 @@ A modern, interactive file manager with AI-driven features and vibrant visualiza
 ## Features
 - **File Operations**:
   - Create, rename, delete files/folders with undo support.
-  - Recycle bin integration (auto-purge after 30 days).
+  - Recycle bin integration.
   - Double-click to open files or navigate folders.
 - **AI Capabilities**:
   - Auto-generate tags for files (e.g., "photo", "document").
@@ -18,7 +18,7 @@ A modern, interactive file manager with AI-driven features and vibrant visualiza
   - **Depth Pie**: Files by directory depth.
   - **Tag Cloud**: Tag frequency, clickable to filter by tag.
   - **File Age Bar**: Files by age (Today, This Week, This Month, Older).
-- **Search**: Filter by name or tags.
+- **Search**: Filter by name, tags, or content.
 - **UI**:
   - Light (`flatly`) and dark (`darkly`) themes, toggleable.
   - Maximized window, clean layout with emojis (e.g., 🖥️ Explore, 📊 Visualize).
@@ -33,5 +33,47 @@ A modern, interactive file manager with AI-driven features and vibrant visualiza
 
 1. **Clone the Repository** (or copy files to your directory):
    ```bash
-   git clone <repo-url>
+   git clone <https://github.com/NyasaVishwas/AI-Powered-Directory-Management-System.git>
    cd AI-Powered-Directory-Management-System
+
+2. **Create a Virtual Environment**: 
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # macOS/Linux
+   venv\Scripts\activate     # Windows
+
+3. **Install Dependencies**: 
+   ```bash
+   pip install -r requirements.txt
+
+**Requirements include**:
+- nltk==3.8.1
+- pytesseract==0.3.10
+- matplotlib==3.8.0
+- PyPDF2==3.0.1
+- python-docx==1.1.0
+- ttkbootstrap==1.10.1
+
+4. **Install Tesseract OCR**: 
+- **macOS:**
+   ```bash
+   brew install tesseract
+
+- **Windows:** Download and install from Tesseract at UB Mannheim.
+
+- **Linux:**
+   ```bash
+   sudo apt-get install tesseract-ocr
+
+
+5. **Download NLTK Data**: 
+   ```bash
+   import nltk
+   nltk.download('punkt')
+   nltk.download('averaged_perceptron_tagger')
+   nltk.download('stopwords')
+
+## Usage
+- **Run the Application**: 
+   ```bash
+   python interface.py
