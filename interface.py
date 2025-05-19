@@ -12,6 +12,11 @@ import ttkbootstrap as ttkb
 from ttkbootstrap.constants import *
 from ai import AIDirectoryManager
 from visualization import VisualizationManager
+import nltk
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.WARNING)
 
 RECYCLE_BIN = os.path.join(os.path.expanduser("~"), ".recycle_bin")
 if not os.path.exists(RECYCLE_BIN):
@@ -48,6 +53,15 @@ class FileManagerApp:
         self.theme_var = tk.StringVar(value="flatly")
         self.content_search_var = tk.BooleanVar(value=False)
 
+        # Try to download NLTK punkt_tab if not available
+        try:
+            nltk.data.find('tokenizers/punkt_tab')
+        except LookupError:
+            try:
+                nltk.download('punkt_tab', quiet=True)
+            except Exception as e:
+                logging.warning(f"Failed to download NLTK punkt_tab: {e}")
+
         self.main_frame = ttk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -70,11 +84,10 @@ class FileManagerApp:
         ttk.Radiobutton(self.top_frame, text="Name", variable=self.search_mode_var, value="name", command=self.search_items).pack(side=tk.LEFT)
         ttk.Radiobutton(self.top_frame, text="Tags", variable=self.search_mode_var, value="tags", command=self.search_items).pack(side=tk.LEFT)
         ttk.Checkbutton(self.top_frame, text="Content", variable=self.content_search_var, command=self.search_items).pack(side=tk.LEFT, padx=5)
-        self.menu_button = ttk.Menubutton(self.top_frame, text="Menu", style="primary.TButton")  # Changed from ⋮ to "Menu"
-        self.menu_button.menu = tk.Menu(self.menu_button, tearoff=0)
-        self.menu_button["menu"] = self.menu_button.menu
-        self.menu_button.menu.add_command(label="Open Recycle Bin", command=self.open_recycle_bin)
+        self.menu_button = ttk.Button(self.top_frame, text="⋮", command=self.show_menu, style="primary.TButton", width=3)
         self.menu_button.pack(side=tk.RIGHT, padx=(0, 10))
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="Open Recycle Bin", command=self.open_recycle_bin)
 
         self.toggle_frame = ttk.Frame(self.main_frame)
         self.toggle_frame.pack(fill=tk.X, pady=5)
@@ -136,6 +149,7 @@ class FileManagerApp:
                 self.undo_button.config(state=tk.DISABLED)
 
         self.empty_bin_button = None
+        self.purge_old_button = None
         self.status_label = ttk.Label(self.main_frame, text="", bootstyle="inverse", anchor=tk.W)
         self.status_label.pack(fill=tk.X, side=tk.BOTTOM)
 
@@ -146,6 +160,14 @@ class FileManagerApp:
         self.bind_shortcuts()
         self.show_normal_ui()
         self.list_directory()
+
+    def show_menu(self):
+        try:
+            x = self.menu_button.winfo_rootx()
+            y = self.menu_button.winfo_rooty() + self.menu_button.winfo_height()
+            self.context_menu.post(x, y)
+        finally:
+            self.context_menu.grab_release()
 
     def toggle_theme(self):
         current_theme = self.theme_var.get()
@@ -171,29 +193,40 @@ class FileManagerApp:
                     pass
 
     def create_context_menu(self):
-        self.menu = tk.Menu(self.root, tearoff=0)
-        self.menu.add_command(label="✏️ Rename", command=self.rename_item)
-        self.menu.add_command(label="\U0001F5D1️ Delete", command=self.delete_item)
-        self.menu.add_command(label="\U0001F4C4 Create File", command=self.create_file)
-        self.menu.add_command(label="\U0001F4C1 Create Folder", command=self.create_folder)
-        self.menu.add_command(label="🤖 Categorize", command=self.categorize_files)
-        self.menu.add_command(label="🔍 Find Duplicates", command=self.find_duplicates)
-        self.menu.add_command(label="🏷️ Tag Selected", command=self.tag_selected_file)
-        self.menu.add_command(label="↩️ Undo", command=self.undo_action)
+        self.normal_menu = tk.Menu(self.root, tearoff=0)
+        self.normal_menu.add_command(label="✏️ Rename", command=self.rename_item)
+        self.normal_menu.add_command(label="\U0001F5D1️ Delete", command=self.delete_item)
+        self.normal_menu.add_command(label="\U0001F4C4 Create File", command=self.create_file)
+        self.normal_menu.add_command(label="\U0001F4C1 Create Folder", command=self.create_folder)
+        self.normal_menu.add_command(label="🤖 Categorize", command=self.categorize_files)
+        self.normal_menu.add_command(label="🔍 Find Duplicates", command=self.find_duplicates)
+        self.normal_menu.add_command(label="🏷️ Tag Selected", command=self.tag_selected_file)
+        self.normal_menu.add_command(label="↩️ Undo", command=self.undo_action)
+
+        self.recycle_menu = tk.Menu(self.root, tearoff=0)
+        self.recycle_menu.add_command(label="↩️ Undo", command=self.undo_action)
+
         self.tree.bind("<Button-3>", self.show_context_menu)
 
     def show_context_menu(self, event):
         try:
             self.tree.selection_set(self.tree.identify_row(event.y))
-            self.menu.post(event.x_root, event.y_root)
+            menu = self.recycle_menu if self.current_path == RECYCLE_BIN else self.normal_menu
+            menu.post(event.x_root, event.y_root)
         finally:
-            self.menu.grab_release()
+            menu.grab_release()
 
     def bind_shortcuts(self):
-        self.root.bind('<Delete>', lambda e: self.delete_item())
-        self.root.bind('<Control-r>', lambda e: self.rename_item())
-        self.root.bind('<Control-n>', lambda e: self.create_file())
+        self.root.bind('<Delete>', lambda e: self.restrict_action(self.delete_item))
+        self.root.bind('<Control-r>', lambda e: self.restrict_action(self.rename_item))
+        self.root.bind('<Control-n>', lambda e: self.restrict_action(self.create_file))
         self.root.bind('<Control-z>', lambda e: self.undo_action())
+
+    def restrict_action(self, action):
+        if self.current_path == RECYCLE_BIN:
+            messagebox.showwarning("Restricted", "Cannot perform this action in Recycle Bin. Restore the file to edit it.")
+            return
+        action()
 
     def show_normal_ui(self):
         if self.vis_canvas:
@@ -202,7 +235,10 @@ class FileManagerApp:
         self.vis_buttons_frame.pack_forget()
         self.vis_frame.pack_forget()
         self.tree_frame.pack(fill=tk.BOTH, expand=True)
-        self.btn_frame.pack(fill=tk.X, pady=10)
+        if self.current_path != RECYCLE_BIN:
+            self.btn_frame.pack(fill=tk.X, pady=10)
+        else:
+            self.btn_frame.pack_forget()
         self.status_label.pack(fill=tk.X, side=tk.BOTTOM)
         self.normal_button.config(state=tk.DISABLED)
         self.visualize_button.config(state=tk.NORMAL)
@@ -373,6 +409,9 @@ class FileManagerApp:
         if self.empty_bin_button:
             self.empty_bin_button.destroy()
             self.empty_bin_button = None
+        if self.purge_old_button:
+            self.purge_old_button.destroy()
+            self.purge_old_button = None
 
         filter_text = filter_text.lower()
         content_search = self.content_search_var.get()
@@ -412,8 +451,11 @@ class FileManagerApp:
         if self.current_path == RECYCLE_BIN:
             self.empty_bin_button = ttk.Button(self.main_frame, text="Empty Recycle Bin", command=self.empty_recycle_bin, style="danger.TButton")
             self.empty_bin_button.pack(side=tk.TOP, pady=(0, 5), fill=tk.X, padx=10)
-
-        self.status_label.config(text=f"{len(self.file_paths)} items found in: {self.current_path}")
+            self.purge_old_button = ttk.Button(self.main_frame, text="Purge Old Files", command=self.purge_old_files_manual, style="warning.TButton")
+            self.purge_old_button.pack(side=tk.TOP, pady=(0, 5), fill=tk.X, padx=10)
+            self.status_label.config(text=f"{len(self.file_paths)} items in Recycle Bin. Restore files to edit.")
+        else:
+            self.status_label.config(text=f"{len(self.file_paths)} items found in: {self.current_path}")
 
     def sort_by_column(self, col, reverse):
         data = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
@@ -458,6 +500,23 @@ class FileManagerApp:
                 if src in self.tags_cache:
                     self.tags_cache[dst] = self.tags_cache.pop(src)
                 messagebox.showinfo("Undo", f"Reverted to '{os.path.basename(dst)}'")
+            elif action["type"] == "categorize":
+                for move in action["moves"]:
+                    src = move["dst"]
+                    dst = move["src"]
+                    shutil.move(src, dst)
+                    if src in self.tags_cache:
+                        self.tags_cache[dst] = self.tags_cache.pop(src)
+                messagebox.showinfo("Undo", f"Reverted categorization of {len(action['moves'])} files")
+            elif action["type"] == "tag":
+                for file_info in action["files"]:
+                    path = file_info["path"]
+                    old_tags = file_info["old_tags"]
+                    if old_tags:
+                        self.tags_cache[path] = old_tags
+                    else:
+                        self.tags_cache.pop(path, None)
+                messagebox.showinfo("Undo", f"Reverted tags for {len(action['files'])} files")
         except Exception as e:
             messagebox.showerror("Error", f"Could not undo: {e}")
             self.undo_stack.append(action)
@@ -594,11 +653,32 @@ class FileManagerApp:
                     messagebox.showerror("Error", f"Could not delete: {item}\n{e}")
             self.list_directory()
 
+    def purge_old_files_manual(self):
+        confirm = messagebox.askyesno("Purge Old Files", "Delete files older than 30 days from Recycle Bin?")
+        if confirm:
+            now = datetime.datetime.now()
+            deleted = 0
+            for item in os.listdir(RECYCLE_BIN):
+                full_path = os.path.join(RECYCLE_BIN, item)
+                modified_time = datetime.datetime.fromtimestamp(os.path.getmtime(full_path))
+                if (now - modified_time).days > 30:
+                    try:
+                        if os.path.isdir(full_path):
+                            shutil.rmtree(full_path)
+                        else:
+                            os.remove(full_path)
+                        deleted += 1
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Could not delete: {item}\n{e}")
+            messagebox.showinfo("Purge Complete", f"Deleted {deleted} old items from Recycle Bin.")
+            self.list_directory()
+
     def categorize_files(self):
         structure = self.ai_manager.suggest_folder_structure(self.current_path)
         if not structure:
             messagebox.showinfo("Categorize", "No files to categorize.")
             return
+        moves = []
         for category, files in structure.items():
             cat_dir = os.path.join(self.current_path, category)
             if not os.path.exists(cat_dir):
@@ -608,10 +688,17 @@ class FileManagerApp:
                 dst = os.path.join(cat_dir, file)
                 try:
                     shutil.move(src, dst)
+                    moves.append({"src": src, "dst": dst})
                     if src in self.tags_cache:
                         self.tags_cache[dst] = self.tags_cache.pop(src)
                 except Exception as e:
                     print(f"Error moving {file}: {e}")
+        if moves:
+            self.undo_stack.append({
+                "type": "categorize",
+                "moves": moves
+            })
+            self.update_undo_button()
         messagebox.showinfo("Categorize", "Files organized into category folders.")
         self.list_directory()
 
@@ -625,26 +712,79 @@ class FileManagerApp:
 
     def tag_files(self):
         tagged_files = []
+        tag_changes = []
+        failed_files = []
         for _, path in self.file_paths:
             if os.path.isfile(path):
-                tags = self.ai_manager.generate_tags(path)
-                if tags:
-                    self.tags_cache[path] = tags
-                    tagged_files.append(os.path.basename(path))
+                old_tags = self.tags_cache.get(path, [])
+                try:
+                    tags = self.ai_manager.generate_tags(path)
+                    if tags:
+                        self.tags_cache[path] = tags
+                        tagged_files.append(os.path.basename(path))
+                        tag_changes.append({
+                            "path": path,
+                            "old_tags": old_tags,
+                            "new_tags": tags
+                        })
+                    else:
+                        failed_files.append((os.path.basename(path), "No tags generated"))
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if "tesseract is not installed" in error_msg:
+                        error_reason = "Tesseract not installed for OCR"
+                    elif "codec can't encode" in error_msg:
+                        error_reason = "PDF encoding error"
+                    else:
+                        error_reason = str(e)
+                    logging.warning(f"Failed to tag {os.path.basename(path)}: {error_reason}")
+                    failed_files.append((os.path.basename(path), error_reason))
+        if tag_changes:
+            self.undo_stack.append({
+                "type": "tag",
+                "files": tag_changes
+            })
+            self.update_undo_button()
         self.list_directory()
+        message = ""
         if tagged_files:
-            messagebox.showinfo("Tagging", f"Tagged {len(tagged_files)} files: {', '.join(tagged_files)}")
-        else:
-            messagebox.showinfo("Tagging", "No tags generated for files.")
+            message += f"Tagged {len(tagged_files)} files: {', '.join(tagged_files)}"
+        if failed_files:
+            failed_details = "\n".join([f"{name}: {reason}" for name, reason in failed_files])
+            message += f"\nFailed to tag {len(failed_files)} files:\n{failed_details}"
+        if not tagged_files and not failed_files:
+            message = "No tags generated for files."
+        messagebox.showinfo("Tagging", message)
 
     def tag_selected_file(self):
         _, path = self.get_selected_path()
         if not path or not os.path.isfile(path):
             messagebox.showwarning("Warning", "Select a file to tag.")
             return
-        tags = self.ai_manager.generate_tags(path)
-        self.tags_cache[path] = tags
-        messagebox.showinfo("Tags", f"Tags for {os.path.basename(path)}: {', '.join(tags)}")
+        old_tags = self.tags_cache.get(path, [])
+        try:
+            tags = self.ai_manager.generate_tags(path)
+            self.tags_cache[path] = tags
+            self.undo_stack.append({
+                "type": "tag",
+                "files": [{
+                    "path": path,
+                    "old_tags": old_tags,
+                    "new_tags": tags
+                }]
+            })
+            self.update_undo_button()
+            messagebox.showinfo("Tags", f"Tags for {os.path.basename(path)}: {', '.join(tags)}")
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "tesseract is not installed" in error_msg:
+                error_reason = "Tesseract not installed for OCR. Please install Tesseract (e.g., 'brew install tesseract')."
+            elif "codec can't encode" in error_msg:
+                error_reason = "PDF encoding error. The PDF contains invalid characters."
+            else:
+                error_reason = str(e)
+            logging.warning(f"Failed to tag {os.path.basename(path)}: {error_reason}")
+            messagebox.showerror("Error", f"Failed to tag {os.path.basename(path)}: {error_reason}")
         self.list_directory()
 
 if __name__ == "__main__":
